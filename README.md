@@ -227,7 +227,3 @@ pip install -r requirements.txt
 | tru  | Trumpet         | 小号     |
 | vio  | Violin          | 小提琴   |
 | voi  | Human Voice     | 人声     |
-
----
-
-这份项目说明书为您的AI音频分析项目提供了详细的规划框架。建议在实际开发过程中根据具体需求和技术进展进行适当调整。需要我详细说明某个特定部分吗？
