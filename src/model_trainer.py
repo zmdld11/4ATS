@@ -87,7 +87,7 @@ class AdvancedModelTrainer:
         return epoch_loss, epoch_acc
     
     def train(self, train_loader, val_loader, epochs=Config.EPOCHS, patience=20):
-        """使用先进技术训练模型"""
+        """使用先进技术训练模型 - 增加稳定性"""
         # 使用AdamW和权重衰减
         optimizer = torch.optim.AdamW(
             self.model.parameters(), 
@@ -99,46 +99,110 @@ class AdvancedModelTrainer:
         # 带热重启的余弦退火
         scheduler = CosineAnnealingWarmRestarts(
             optimizer, 
-            T_0=10,  # 第一次重启的迭代次数
-            T_mult=2,  # 每次重启后T增加的因素
-            eta_min=1e-6  # 最小学习率
+            T_0=10,
+            T_mult=2,
+            eta_min=1e-6
         )
         
         print("开始使用先进技术训练模型...")
         best_val_acc = 0.0
         patience_counter = 0
         
+        # 添加梯度累积步骤
+        accumulation_steps = 4  # 每4个batch更新一次权重
+        
         for epoch in range(epochs):
-            # 训练阶段
-            train_loss, train_acc = self.train_epoch(train_loader, optimizer, scheduler)
-            
-            # 验证阶段
-            val_loss, val_acc = self.validate(val_loader)
-            
-            # 记录历史
-            self.history['train_loss'].append(train_loss)
-            self.history['val_loss'].append(val_loss)
-            self.history['train_acc'].append(train_acc)
-            self.history['val_acc'].append(val_acc)
-            self.history['learning_rates'].append(optimizer.param_groups[0]['lr'])
-            
-            print(f'周期 [{epoch+1}/{epochs}] - {self.model_type}模型')
-            print(f'  训练损失: {train_loss:.4f}, 训练准确率: {train_acc:.4f}')
-            print(f'  验证损失: {val_loss:.4f}, 验证准确率: {val_acc:.4f}')
-            print(f'  学习率: {optimizer.param_groups[0]["lr"]:.2e}')
-            
-            # 早停和模型保存
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
-                patience_counter = 0
-                self.save_model()
-                print(f'  ✅ 保存最佳{self.model_type}模型，验证准确率: {val_acc:.4f}')
-            else:
-                patience_counter += 1
+            try:
+                # 训练阶段
+                self.model.train()
+                running_loss = 0.0
+                correct = 0
+                total = 0
+                optimizer.zero_grad()
                 
-            if patience_counter >= patience:
-                print(f'早停: 验证准确率连续{patience}个周期未提升')
-                break
+                for i, (data, labels) in enumerate(train_loader):
+                    data, labels = data.to(self.device), labels.to(self.device)
+                    
+                    # 混合精度训练
+                    with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+                        outputs = self.model(data)
+                        loss = self.criterion(outputs, labels) / accumulation_steps
+                    
+                    # 反向传播
+                    loss.backward()
+                    
+                    # 每 accumulation_steps 个batch更新一次权重
+                    if (i + 1) % accumulation_steps == 0:
+                        # 梯度裁剪
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        optimizer.step()
+                        optimizer.zero_grad()
+                        
+                        if scheduler:
+                            scheduler.step()
+                    
+                    # 统计信息
+                    running_loss += loss.item() * accumulation_steps
+                    _, predicted = torch.max(outputs.data, 1)
+                    total += labels.size(0)
+                    correct += (predicted == labels).sum().item()
+                
+                # 处理最后一个不完整的accumulation step
+                if len(train_loader) % accumulation_steps != 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    
+                    if scheduler:
+                        scheduler.step()
+                
+                train_loss = running_loss / len(train_loader)
+                train_acc = correct / total
+                
+                # 验证阶段
+                val_loss, val_acc = self.validate(val_loader)
+                
+                # 记录历史
+                self.history['train_loss'].append(train_loss)
+                self.history['val_loss'].append(val_loss)
+                self.history['train_acc'].append(train_acc)
+                self.history['val_acc'].append(val_acc)
+                self.history['learning_rates'].append(optimizer.param_groups[0]['lr'])
+                
+                print(f'周期 [{epoch+1}/{epochs}] - {self.model_type}模型')
+                print(f'  训练损失: {train_loss:.4f}, 训练准确率: {train_acc:.4f}')
+                print(f'  验证损失: {val_loss:.4f}, 验证准确率: {val_acc:.4f}')
+                print(f'  学习率: {optimizer.param_groups[0]["lr"]:.2e}')
+                
+                # 早停和模型保存
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    patience_counter = 0
+                    self.save_model()
+                    print(f'  ✅ 保存最佳{self.model_type}模型，验证准确率: {val_acc:.4f}')
+                else:
+                    patience_counter += 1
+                    
+                if patience_counter >= patience:
+                    print(f'早停: 验证准确率连续{patience}个周期未提升')
+                    break
+                
+                # 定期清理GPU缓存
+                if torch.cuda.is_available() and epoch % 10 == 0:
+                    torch.cuda.empty_cache()
+                    
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    print("GPU内存不足，尝试清理缓存并跳过该batch")
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    continue
+                else:
+                    raise e
+            except Exception as e:
+                print(f"训练过程中出现异常: {e}")
+                print("跳过该epoch，继续训练...")
+                continue
         
         return self.history
     

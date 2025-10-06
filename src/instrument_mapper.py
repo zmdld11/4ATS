@@ -73,3 +73,8 @@ class InstrumentMapper:
         for abbrev, english_name in cls.IRMAS_MAPPING.items():
             description = cls.INSTRUMENT_DESCRIPTIONS.get(english_name, "No description")
             print(f"{abbrev:4s} -> {english_name:15s} : {description}")
+
+    @staticmethod
+    def get_english_name_static(abbreviation):
+        """静态方法获取英文名称"""
+        return InstrumentMapper.get_english_name(abbreviation)

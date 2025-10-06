@@ -25,8 +25,8 @@ def download_dataset():
     else:
         print("Dataset already exists!")
 
-def plot_training_history(train_losses, val_losses, train_accs, val_accs, save_path=None):
-    """Plot training history charts"""
+def plot_training_history(train_losses, val_losses, train_accs, val_accs, save_path=None, show_plot=False):
+    """Plot training history charts - 修改为不自动显示"""
     plt.figure(figsize=(12, 4))
     
     # Accuracy chart
@@ -56,7 +56,11 @@ def plot_training_history(train_losses, val_losses, train_accs, val_accs, save_p
                    facecolor='white', edgecolor='none')
         print(f"Training chart saved to: {save_path}")
     
-    plt.show()
+    # 只在明确要求时显示
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()  # 关闭图表，释放内存
 
 def analyze_model_performance(model, test_loader, label_encoder, device, save_dir):
     """Analyze model performance"""

@@ -126,6 +126,18 @@ def train_single_model(model_type, train_loader, val_loader, test_loader, prepro
     
     return test_acc, history
 
+def setup_device():
+    """设置训练设备 - 增加内存监控"""
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        print(f"🎉 使用GPU: {torch.cuda.get_device_name(0)}")
+        # 打印GPU内存信息
+        print(f"GPU内存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+    else:
+        device = torch.device('cpu')
+        print("❌ 使用CPU进行训练")
+    return device
+
 def main():
     """主函数"""
     args = parse_arguments()
@@ -187,25 +199,26 @@ def main():
             }
             
             # 可视化结果
-            # print(f"8. 生成{model_type}模型可视化结果...")
-            # plot_training_history(
-            #     history['train_loss'], history['val_loss'],
-            #     history['train_acc'], history['val_acc'],
-            #     os.path.join(Config.OUTPUT_DIR, f'training_curves_{model_type}.png')
-            # )
+            print(f"8. 生成{model_type}模型可视化结果...")
+            plot_training_history(
+                history['train_loss'], history['val_loss'],
+                history['train_acc'], history['val_acc'],
+                os.path.join(Config.OUTPUT_DIR, f'training_curves_{model_type}.png'),
+                show_plot=False  # 添加这个参数
+            )
             
-            # # 性能分析（只在最后一个模型上执行，避免重复）
-            # if model_type == model_types[-1]:
-            #     print("9. 性能分析...")
-            #     # 重新加载最佳模型进行评估
-            #     best_model = create_model(model_type, train_loader.dataset[0][0].shape, num_classes)
-            #     best_model = best_model.to(device)
-            #     load_success, _ = model_manager.load_model(best_model, model_type, device)
+            # 性能分析（只在最后一个模型上执行，避免重复）
+            if model_type == model_types[-1]:
+                print("9. 性能分析...")
+                # 重新加载最佳模型进行评估
+                best_model = create_model(model_type, train_loader.dataset[0][0].shape, num_classes)
+                best_model = best_model.to(device)
+                load_success, _ = model_manager.load_model(best_model, model_type, device)
                 
-            #     if load_success:
-            #         analyze_model_performance(
-            #             best_model, test_loader, preprocessor.label_encoder, device, Config.OUTPUT_DIR
-            #         )
+                if load_success:
+                    analyze_model_performance(
+                        best_model, test_loader, preprocessor.label_encoder, device, Config.OUTPUT_DIR
+                    )
             
         except Exception as e:
             print(f"❌ 训练{model_type}模型时出错: {e}")
