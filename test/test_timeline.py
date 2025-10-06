@@ -11,6 +11,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from config.config import Config
+from config.music_file_loader import load_music_files  # 新增导入
 from src.model_builder import create_improved_classifier
 from src.advanced_models import create_advanced_classifier, create_simplified_classifier
 from src.time_series_analyzer import TimeSeriesAnalyzer
@@ -222,8 +223,10 @@ def main():
                        choices=['basic', 'simplified', 'advanced', 'all'],
                        help='要测试的模型类型')
     parser.add_argument('--audio-path', type=str, 
-                       default=os.path.join(project_root, "music", "3.flac"),
-                       help='测试音频路径')
+                       default=None,  # 修改为None
+                       help='测试音频路径（如未指定则使用music.txt中的文件）')
+    parser.add_argument('--batch', action='store_true',
+                       help='批量测试music.txt中的所有文件')
     
     args = parser.parse_args()
     
@@ -232,35 +235,69 @@ def main():
     # 1. 初始化配置
     Config.create_directories()
     
-    # 2. 检查音频文件是否存在
-    if not os.path.exists(args.audio_path):
-        print(f"错误: 测试音频文件不存在 - {args.audio_path}")
-        print("请确保音频文件存在")
-        return
-    
-    if args.model_type == 'all':
-        # 测试所有模型
-        model_types = ['basic', 'simplified', 'advanced']
-        all_results = {}
+    if args.batch or args.audio_path is None:
+        # 批量测试模式
+        music_files = load_music_files()
+        if not music_files:
+            print("错误: 没有找到可测试的音乐文件")
+            return
         
-        for model_type in model_types:
-            result = test_timeline_with_model(model_type, args.audio_path)
-            if result:
-                all_results[model_type] = result
+        print(f"批量时间线分析 {len(music_files)} 个音乐文件...")
         
-        # 输出比较结果
-        print(f"\n{'='*60}")
-        print("时间线分析模型比较结果")
-        print(f"{'='*60}")
-        
-        for model_type, instruments in all_results.items():
-            print(f"\n{model_type:>10}模型: 检测到 {len(instruments)} 种乐器")
-            for i, (name, duration, _) in enumerate(instruments[:3]):  # 显示前3种
-                print(f"            {i+1}. {name}: {duration:.1f}s")
-    
+        for music_path in music_files:
+            print(f"\n分析文件: {os.path.basename(music_path)}")
+            
+            if args.model_type == 'all':
+                # 测试所有模型
+                model_types = ['basic', 'simplified', 'advanced']
+                all_results = {}
+                
+                for model_type in model_types:
+                    result = test_timeline_with_model(model_type, music_path)
+                    if result:
+                        all_results[model_type] = result
+                
+                # 输出比较结果
+                print(f"\n{'='*60}")
+                print(f"文件 {os.path.basename(music_path)} 的时间线分析模型比较结果")
+                print(f"{'='*60}")
+                
+                for model_type, instruments in all_results.items():
+                    print(f"\n{model_type:>10}模型: 检测到 {len(instruments)} 种乐器")
+                    for i, (name, duration, _) in enumerate(instruments[:3]):
+                        print(f"            {i+1}. {name}: {duration:.1f}s")
+            else:
+                # 测试单个模型
+                test_timeline_with_model(args.model_type, music_path)
     else:
-        # 测试单个模型
-        test_timeline_with_model(args.model_type, args.audio_path)
+        # 单个文件测试模式（原有逻辑）
+        if not os.path.exists(args.audio_path):
+            print(f"错误: 测试音频文件不存在 - {args.audio_path}")
+            print("请确保音频文件存在")
+            return
+        
+        if args.model_type == 'all':
+            # 测试所有模型
+            model_types = ['basic', 'simplified', 'advanced']
+            all_results = {}
+            
+            for model_type in model_types:
+                result = test_timeline_with_model(model_type, args.audio_path)
+                if result:
+                    all_results[model_type] = result
+            
+            # 输出比较结果
+            print(f"\n{'='*60}")
+            print("时间线分析模型比较结果")
+            print(f"{'='*60}")
+            
+            for model_type, instruments in all_results.items():
+                print(f"\n{model_type:>10}模型: 检测到 {len(instruments)} 种乐器")
+                for i, (name, duration, _) in enumerate(instruments[:3]):
+                    print(f"            {i+1}. {name}: {duration:.1f}s")
+        else:
+            # 测试单个模型
+            test_timeline_with_model(args.model_type, args.audio_path)
 
 if __name__ == "__main__":
     main()

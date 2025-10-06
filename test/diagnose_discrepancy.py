@@ -5,21 +5,54 @@ import librosa
 import numpy as np
 import joblib
 import matplotlib.pyplot as plt
+import argparse
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from config.config import Config
+from config.music_file_loader import load_music_files
 from src.instrument_mapper import InstrumentMapper
 
-def diagnose_analysis(audio_path, model_path, label_encoder_path):
-    """诊断分析不一致问题"""
-    print("=== 分析不一致诊断 ===")
+def diagnose_analysis_batch():
+    """批量诊断分析不一致问题"""
+    # 加载音乐文件
+    music_files = load_music_files()
+    if not music_files:
+        print("没有找到可诊断的音乐文件")
+        return
+    
+    print(f"开始批量诊断分析 {len(music_files)} 个音乐文件...")
     
     # 设置设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
+    for i, audio_path in enumerate(music_files, 1):
+        print(f"\n{'='*60}")
+        print(f"[{i}/{len(music_files)}] 诊断分析: {os.path.basename(audio_path)}")
+        print(f"{'='*60}")
+        
+        # 这里可以调用原来的诊断函数，但需要调整以支持批量处理
+        # diagnose_single_analysis(audio_path, device)
+        
+        # 简化版的诊断分析
+        try:
+            # 加载第一个可用模型进行诊断
+            model_type = 'simplified'
+            model_path = os.path.join(project_root, "model", f"model_{model_type}.pth")
+            label_encoder_path = os.path.join(project_root, "model", f"model_{model_type}_label_encoder.pkl")
+            
+            if os.path.exists(model_path) and os.path.exists(label_encoder_path):
+                diagnose_single_analysis(audio_path, model_path, label_encoder_path, device)
+            else:
+                print(f"模型文件不存在，跳过诊断")
+                
+        except Exception as e:
+            print(f"诊断过程中出错: {e}")
+
+def diagnose_single_analysis(audio_path, model_path, label_encoder_path, device):
+    """诊断单个文件的分析不一致问题"""
     # 加载模型和标签编码器
     label_encoder = joblib.load(label_encoder_path)
     checkpoint = torch.load(model_path, map_location=device)
@@ -35,27 +68,22 @@ def diagnose_analysis(audio_path, model_path, label_encoder_path):
     duration = len(y) / sr
     print(f"音频时长: {duration:.2f}秒")
     
-    # 测试1: 整体分析（类似inst_model_test.py）
+    # 测试1: 整体分析
     print("\n1. 整体分析（3秒片段）:")
     test_overall_analysis(y, sr, model, label_encoder, device)
     
-    # 测试2: 多个窗口分析（类似timeline分析）
+    # 测试2: 多个窗口分析
     print("\n2. 多窗口分析:")
     test_multiple_windows(y, sr, model, label_encoder, device)
     
-    # 测试3: 不同时间点的分析
-    print("\n3. 不同时间点分析:")
-    test_different_timestamps(y, sr, model, label_encoder, device, duration)
-    
-    # 测试4: 置信度分布
-    print("\n4. 置信度分布分析:")
+    # 测试3: 置信度分布
+    print("\n3. 置信度分布分析:")
     test_confidence_distribution(y, sr, model, label_encoder, device)
 
+# 保留原有的测试函数（test_overall_analysis, test_multiple_windows等）
 def test_overall_analysis(y, sr, model, label_encoder, device):
     """测试整体分析"""
-    # 取前3秒（类似inst_model_test.py）
     segment = y[:3*sr] if len(y) > 3*sr else y
-    
     features = extract_features(segment, sr)
     if features is not None:
         probs = predict_single_window(features, model, label_encoder, device)
@@ -73,31 +101,14 @@ def test_multiple_windows(y, sr, model, label_encoder, device):
     for start in range(0, min(len(y) - window_samples, 10 * hop_samples), hop_samples):
         end = start + window_samples
         segment = y[start:end]
-        
         features = extract_features(segment, sr)
         if features is not None:
             probs = predict_single_window(features, model, label_encoder, device)
             all_predictions.append(probs)
     
-    # 计算平均概率
     if all_predictions:
         avg_probs = np.mean(all_predictions, axis=0)
         print_top_predictions(avg_probs, label_encoder, "多窗口平均")
-
-def test_different_timestamps(y, sr, model, label_encoder, device, duration):
-    """测试不同时间点"""
-    test_points = [0, duration/4, duration/2, 3*duration/4]
-    
-    for i, time_point in enumerate(test_points):
-        start_sample = int(time_point * sr)
-        end_sample = start_sample + 3 * sr
-        
-        if end_sample < len(y):
-            segment = y[start_sample:end_sample]
-            features = extract_features(segment, sr)
-            if features is not None:
-                probs = predict_single_window(features, model, label_encoder, device)
-                print_top_predictions(probs, label_encoder, f"时间点 {time_point:.1f}s")
 
 def test_confidence_distribution(y, sr, model, label_encoder, device):
     """测试置信度分布"""
@@ -111,16 +122,13 @@ def test_confidence_distribution(y, sr, model, label_encoder, device):
     for start in range(0, min(len(y) - window_samples, 20 * hop_samples), hop_samples):
         end = start + window_samples
         segment = y[start:end]
-        
         features = extract_features(segment, sr)
         if features is not None:
             probs = predict_single_window(features, model, label_encoder, device)
-            
             for idx, prob in enumerate(probs):
                 instrument = label_encoder.inverse_transform([idx])[0]
                 instrument_confidences[instrument].append(prob)
     
-    # 打印置信度统计
     print("\n置信度统计:")
     for instrument, confidences in instrument_confidences.items():
         if confidences:
@@ -139,7 +147,6 @@ def extract_features(audio, sr, target_shape=(128, 130)):
         log_mel = librosa.power_to_db(mel_spec)
         log_mel = (log_mel - np.mean(log_mel)) / (np.std(log_mel) + 1e-8)
         
-        # 调整形状
         if log_mel.shape[1] < target_shape[1]:
             log_mel = np.pad(log_mel, ((0, 0), (0, target_shape[1] - log_mel.shape[1])), mode='constant')
         else:
@@ -173,11 +180,17 @@ def print_top_predictions(probs, label_encoder, title):
 
 def main():
     """主诊断函数"""
-    audio_path = os.path.join(project_root, "music", "3.flac")
-    model_path = os.path.join(project_root, "model", "best_model.pth")
-    label_encoder_path = os.path.join(project_root, "model", "best_model_label_encoder.pkl")
+    parser = argparse.ArgumentParser(description='批量诊断分析')
     
-    diagnose_analysis(audio_path, model_path, label_encoder_path)
+    args = parser.parse_args()
+    
+    print("=== 批量分析不一致诊断 ===")
+    
+    # 初始化配置
+    Config.create_directories()
+    
+    # 执行批量诊断
+    diagnose_analysis_batch()
 
 if __name__ == "__main__":
     main()

@@ -12,6 +12,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from config.config import Config
+from config.music_file_loader import load_music_files  # 新增导入
 from src.model_builder import create_improved_classifier
 from src.advanced_models import create_advanced_classifier, create_simplified_classifier
 from src.instrument_mapper import InstrumentMapper
@@ -238,8 +239,10 @@ def main():
                        choices=['basic', 'simplified', 'advanced', 'all'],
                        help='要测试的模型类型')
     parser.add_argument('--audio-path', type=str, 
-                       default=os.path.join(project_root, "music", "3.flac"),
-                       help='测试音频路径')
+                       default=None,  # 修改为None，使用music.txt
+                       help='测试音频路径（如未指定则使用music.txt中的文件）')
+    parser.add_argument('--batch', action='store_true',
+                       help='批量测试music.txt中的所有文件')
     
     args = parser.parse_args()
     
@@ -248,48 +251,61 @@ def main():
     # 1. 初始化配置
     Config.create_directories()
     
-    # 2. 检查音频文件是否存在
-    if not os.path.exists(args.audio_path):
-        print(f"错误: 测试音频文件不存在 - {args.audio_path}")
-        print("请确保音频文件存在")
-        return
-    
-    if args.model_type == 'all':
-        # 测试所有模型
-        results = test_all_models(args.audio_path)
-        
-        # 输出比较结果
-        print(f"\n{'='*60}")
-        print("模型比较结果")
-        print(f"{'='*60}")
-        
-        for model_type, result in results.items():
-            top_pred = result['top_prediction']
-            instrument_name = InstrumentMapper.get_english_name(top_pred['instrument'])
-            print(f"{model_type:>10}模型: {instrument_name:15s} (置信度: {top_pred['probability']:.3f})")
-    
-    else:
-        # 测试单个模型
-        tester = MultiModelTester(args.model_type)
-        if tester.model is None:
+    if args.batch or args.audio_path is None:
+        # 批量测试模式
+        music_files = load_music_files()
+        if not music_files:
+            print("错误: 没有找到可测试的音乐文件")
             return
-            
-        predictions, features = tester.predict_single_audio(args.audio_path)
         
-        if predictions:
-            print(f"\n=== {args.model_type}模型预测结果 ===")
-            for pred in predictions:
-                instrument_name = InstrumentMapper.get_english_name(pred['instrument'])
-                print(f"{pred['rank']}. {instrument_name}: {pred['probability']:.3f}")
+        print(f"批量测试 {len(music_files)} 个音乐文件...")
+        
+        for music_path in music_files:
+            print(f"\n测试文件: {os.path.basename(music_path)}")
             
-            # 可视化结果
-            audio_name = os.path.splitext(os.path.basename(args.audio_path))[0]
-            tester.visualize_prediction(predictions, features, audio_name)
+            if args.model_type == 'all':
+                test_all_models(music_path)
+            else:
+                tester = MultiModelTester(args.model_type)
+                if tester.model is None:
+                    continue
+                    
+                predictions, features = tester.predict_single_audio(music_path)
+                
+                if predictions:
+                    print(f"\n=== {args.model_type}模型预测结果 ===")
+                    for pred in predictions:
+                        instrument_name = InstrumentMapper.get_english_name(pred['instrument'])
+                        print(f"{pred['rank']}. {instrument_name}: {pred['probability']:.3f}")
+                    
+                    # 可视化结果
+                    audio_name = os.path.splitext(os.path.basename(music_path))[0]
+                    tester.visualize_prediction(predictions, features, audio_name)
+    else:
+        # 单个文件测试模式（原有逻辑）
+        if not os.path.exists(args.audio_path):
+            print(f"错误: 测试音频文件不存在 - {args.audio_path}")
+            print("请确保音频文件存在")
+            return
+        
+        if args.model_type == 'all':
+            test_all_models(args.audio_path)
+        else:
+            tester = MultiModelTester(args.model_type)
+            if tester.model is None:
+                return
+                
+            predictions, features = tester.predict_single_audio(args.audio_path)
             
-            # 输出最可能的乐器
-            top_prediction = predictions[0]
-            instrument_name = InstrumentMapper.get_english_name(top_prediction['instrument'])
-            print(f"\n🎵 最可能的乐器: {instrument_name} (置信度: {top_prediction['probability']:.3f})")
-
+            if predictions:
+                print(f"\n=== {args.model_type}模型预测结果 ===")
+                for pred in predictions:
+                    instrument_name = InstrumentMapper.get_english_name(pred['instrument'])
+                    print(f"{pred['rank']}. {instrument_name}: {pred['probability']:.3f}")
+                
+                # 可视化结果
+                audio_name = os.path.splitext(os.path.basename(args.audio_path))[0]
+                tester.visualize_prediction(predictions, features, audio_name)
+                
 if __name__ == "__main__":
     main()
